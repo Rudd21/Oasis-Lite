@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oasis Lite - Task Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-8">
+    <div class="max-w-2xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-indigo-400">Oasis Lite Dashboard</h1>
+
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+            <h2 class="text-xl font-semibold mb-4 text-slate-200">Нове завдання</h2>
+            <form id="taskForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-slate-400">Назва</label>
+                    <input type="text" id="title" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1 text-slate-400">Дедлайн</label>
+                    <input type="datetime-local" id="deadline" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg transition">
+                    Створити таску
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-slate-200">Активні дедлайни</h2>
+                <span id="sourceBadge" class="text-xs px-2 py-1 rounded bg-slate-700 text-slate-300">Завантаження...</span>
+            </div>
+            <div id="tasksList" class="space-y-3">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'http://localhost:3001';
+        const API_URL = 'http://localhost:3001/tasks';
+
+        // Функція завантаження тасок
+        async function loadTasks() {
+            try {
+                const res = await fetch(API_URL);
+                const result = await res.json();
+                
+                const list = document.getElementById('tasksList');
+                const badge = document.getElementById('sourceBadge');
+                
+                badge.innerText = `Джерело: ${result.source}`;
+                list.innerHTML = '';
+
+                if (!result.data || result.data.length === 0) {
+                    list.innerHTML = '<p class="text-slate-500 text-center py-4">Немає завдань</p>';
+                    return;
+                }
+
+                result.data.forEach(task => {
+                    const deadlineDate = new Date(task.deadline).toLocaleString('uk-UA');
+                    list.innerHTML += `
+                        <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 flex justify-between items-center">
+                            <div>
+                                <h3 class="font-medium text-white">${task.title}</h3>
+                                <p class="text-xs text-slate-400">Дедлайн: ${deadlineDate}</p>
+                            </div>
+                            <span class="px-2 py-1 text-xs rounded ${task.status === 'pending' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}">
+                                ${task.status}
+                            </span>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                console.error('Помилка завантаження:', err);
+            }
+        }
+
+        // Обробка відправки форми
+        document.getElementById('taskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const title = document.getElementById('title').value;
+            const deadlineRaw = document.getElementById('deadline').value;
+            
+            // Конвертуємо час у ISO формат для DTO
+            const deadline = new Date(deadlineRaw).toISOString();
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, deadline })
+                });
+
+                if (response.ok) {
+                    document.getElementById('taskForm').reset();
+                    // Перезавантажуємо список. Оскільки спрацював del() у сервісі, кеш скинеться
+                    await loadTasks(); 
+                } else {
+                    const errorData = await response.json();
+                    alert(`Помилка валідації: ${errorData.message.join(', ')}`);
+                }
+            } catch (err) {
+                console.error('Помилка відправки:', err);
+            }
+        });
+
+        // Функція для перетворення Base64 публічного ключа у Uint8Array (вимога браузерного API)
+        function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding)
+            .replace(/\-/g, '+')
+            .replace(/_/g, '/');
+
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+        }
+
+        // 1. Реєструємо Service Worker та підписуємо користувача
+        async function initPushNotifications() {
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+            try {
+            // Реєструємо наш sw.js
+            const register = await navigator.serviceWorker.register('/sw.js');
+            console.log('Service Worker зареєстровано успішно!');
+
+            // Запитуємо дозвіл на пуші
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                console.warn('Користувач заблокував сповіщення.');
+                return;
+            }
+
+            // Отримуємо публічний VAPID-ключ з нашого Express бекенду
+            const keyResponse = await fetch(`${BACKEND_URL}/push/public-key`);
+            const { publicKey } = await keyResponse.json();
+
+            if (!publicKey) {
+                console.error('Не вдалося отримати публічний VAPID-ключ');
+                return;
+            }
+
+            // Підписуємо користувача через pushManager браузера
+            const subscription = await register.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(publicKey)
+            });
+
+            // Відправляємо об'єкт підписки на наш бекенд для збереження в MongoDB
+            await fetch(`${BACKEND_URL}/push/subscribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(subscription)
+            });
+
+            console.log('🎉 Користувач успішно підписаний на пуші та збережений в базі!');
+            } catch (error) {
+            console.error('Помилка ініціалізації пушів:', error);
+            }
+        } else {
+            console.warn('Пуш-сповіщення не підтримуються цим браузером.');
+        }
+        }
+
+        loadTasks();
+        initPushNotifications();
+        
+    </script>
+</body>
+</html>

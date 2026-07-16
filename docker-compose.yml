@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # Наш новий швидкий бекенд на Express
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - MONGO_URI=mongodb://mongodb:27017/oasis_lite
+      - REDIS_URL=redis://cache:6379
+      - VAPID_PUBLIC_KEY=BHzG-Bp7d2Va4AFC7cR5a5ReFH_44dHinSEXPWt8sAXD8MrHBYd9UlfacAg07USFXVifaRMD70O5Vcqc_l15KZM
+      - VAPID_PRIVATE_KEY=xnhzRoJD0PCorxa8Z_LA11lBJIWAx_fbHBSYt221-6g
+      - VAPID_EMAIL=mailto:dttty52@gmail.com
+    depends_on:
+      - mongodb
+      - cache
+
+  # База даних MongoDB — жодних міграцій, просто працює
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # Наш старий добрий Redis для швидкого кешу
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongo_data:
